@@ -1,0 +1,45 @@
+{
+  "name": "litecode",
+  "version": "0.1.0",
+  "description": "CLI coding agent for LLMs with 8k context windows — free tiers, local models, and everything in between",
+  "main": "dist/cli/index.js",
+  "bin": {
+    "litecode": "./dist/cli/index.js"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli/index.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "ai",
+    "coding-agent",
+    "llm",
+    "cli",
+    "code-generation",
+    "local-llm",
+    "ollama",
+    "groq",
+    "openrouter",
+    "8k",
+    "small-context",
+    "free-tier"
+  ],
+  "author": "",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/razvanneculai/litecode"
+  },
+  "homepage": "https://github.com/razvanneculai/litecode#readme",
+  "dependencies": {
+    "commander": "^14.0.3",
+    "tiktoken": "^1.0.22"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  }
+}

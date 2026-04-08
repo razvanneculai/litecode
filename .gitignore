@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Local config — contains your API key, never commit this
+litecode.json
+
+# Auto-generated context maps (created by `litecode init` / `litecode map`)
+project_context.md
+**/folder_context.md
+**/*.file_analysis.md
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log

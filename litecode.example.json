@@ -1,0 +1,11 @@
+{
+  "provider": {
+    "baseURL": "https://api.groq.com/openai/v1",
+    "apiKey": "your-api-key-here",
+    "model": "llama-3.3-70b-versatile"
+  },
+  "tokenLimit": 8192,
+  "reservedOutputTokens": 2000,
+  "systemPromptBudget": 1000,
+  "maxParallelExecutors": 3
+}
