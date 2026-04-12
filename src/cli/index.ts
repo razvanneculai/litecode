@@ -20,8 +20,9 @@ const cwd = process.cwd();
 program
   .name("litecode")
   .description("CLI coding agent for 8k-context LLMs")
-  .version("0.1.0")
-  .option("-v, --verbose", "Show token counts and debug info");
+  .version("0.2.0")
+  .option("-v, --verbose", "Show token counts and debug info")
+  .option("-y, --yes", "Apply all changes without confirmation");
 
 // ─── litecode connect ─────────────────────────────────────────────────────────
 
@@ -165,7 +166,8 @@ async function runPipeline(userRequest: string): Promise<void> {
 
   // Apply
   display.blank();
-  await apply(results, editTasks, cwd, display);
+  const opts = program.opts();
+  await apply(results, editTasks, cwd, display, { yes: opts.yes ?? false });
 
   // Summary
   const succeeded = results.filter(r => r.success).length;

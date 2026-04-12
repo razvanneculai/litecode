@@ -1,3 +1,4 @@
+import { createInterface } from "readline";
 import type { Task } from "../orchestrator/planner.js";
 
 // ─── ANSI helpers ────────────────────────────────────────────────────────────
@@ -273,6 +274,50 @@ export class Display {
       process.stdout.write(`  \x1b[33m●\x1b[0m  \x1b[2mNo model configured — type \x1b[0m\x1b[33m/connect\x1b[0m\x1b[2m to get started\x1b[0m\n`);
     }
     process.stdout.write("\n");
+  }
+
+  // ── Diff display ──────────────────────────────────────────────────────────
+
+  diffHeader(filePath: string, label: "new file" | "modified" | "deleted"): void {
+    this._clearLine();
+    const labelColor = label === "new file" ? c.green : label === "deleted" ? c.red : c.yellow;
+    const width = Math.max(0, 60 - filePath.length - label.length - 4);
+    const line = "─".repeat(width);
+    process.stdout.write(`\n  ${c.bold(filePath)}  ${labelColor(label)} ${c.gray(line)}\n`);
+  }
+
+  diffLines(patch: string): void {
+    this._clearLine();
+    const lines = patch.split("\n");
+    // Skip the first two header lines (--- and +++) and last empty line
+    for (const line of lines.slice(2)) {
+      if (line.startsWith("@@")) {
+        process.stdout.write(`  ${c.cyan(line)}\n`);
+      } else if (line.startsWith("+")) {
+        process.stdout.write(`  ${c.green(line)}\n`);
+      } else if (line.startsWith("-")) {
+        process.stdout.write(`  ${c.red(line)}\n`);
+      } else if (line.trim()) {
+        process.stdout.write(`  ${c.dim(line)}\n`);
+      }
+    }
+  }
+
+  async confirm(filePath: string): Promise<"yes" | "no" | "all" | "quit"> {
+    if (!process.stdout.isTTY) return "yes";
+    this._clearLine();
+    process.stdout.write(`\n  ${c.bold(filePath)} — apply? ${c.green("[y]es")} ${c.red("[n]o")} ${c.cyan("[a]ll")} ${c.yellow("[q]uit")} : `);
+    return new Promise(resolve => {
+      const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: false });
+      rl.once("line", line => {
+        rl.close();
+        const answer = line.trim().toLowerCase();
+        if (answer === "y" || answer === "yes") resolve("yes");
+        else if (answer === "a" || answer === "all") resolve("all");
+        else if (answer === "q" || answer === "quit") resolve("quit");
+        else resolve("no");
+      });
+    });
   }
 
   // ── Blank line ────────────────────────────────────────────────────────────

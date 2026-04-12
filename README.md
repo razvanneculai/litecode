@@ -1,10 +1,10 @@
-# LiteCode
+# LiteCode v0.2
 
 > The AI coding agent built for the models everyone actually has — free tiers, local models, and 8k context windows.
 
 LiteCode lets you describe a code change in plain English and have an AI execute it across your entire project. No paid subscription. No 200k-token model required. Works right now with a free Groq account, a free OpenRouter key, or just Ollama on your laptop.
 
-> **Early development warning:** LiteCode is experimental software. It writes directly to your files with no built-in undo. It may produce incorrect edits, overwrite content unexpectedly, or behave unpredictably depending on the model you use. **Always commit or back up your work before running it.** The author takes no responsibility for data loss or file corruption. Use at your own risk.
+> **Early development warning:** LiteCode is experimental software. As of v0.2, it shows a diff and asks for confirmation before touching any file — but it still may produce incorrect edits depending on the model you use. **Always commit or back up your work before running it.** The author takes no responsibility for data loss or file corruption. Use at your own risk.
 
 ---
 
@@ -16,6 +16,7 @@ LiteCode lets you describe a code change in plain English and have an AI execute
 - **Works with any free model** — Groq, OpenRouter, Ollama, LM Studio, Gemini, DeepSeek — all supported out of the box
 - **Context maps are plain Markdown** — readable by humans, cheap on tokens, safe to commit to git
 - **No data leaves your machine** unless you choose a cloud provider — and even then, only the specific files being edited are sent
+- **Diff preview before every write** — see exactly what the AI wants to change, file by file, before anything touches disk *(new in v0.2)*
 
 ---
 
@@ -181,7 +182,30 @@ This scans your project and writes the context map files. The `--fast` flag uses
 litecode "add error handling to the fetchUser function"
 ```
 
-That's it. LiteCode will plan the tasks, run them, and write the changes to disk.
+LiteCode will plan the tasks, execute them, then show you a colored diff for each file and ask before writing anything:
+
+```
+  src/auth.js  modified ─────────────────────────────
+  --- src/auth.js
+  +++ src/auth.js
+  @@ -12,6 +12,10 @@
+   async function fetchUser(id) {
+  +  if (!id) throw new Error('id is required');
+     const res = await db.users.findById(id);
+  +  if (!res) throw new Error('user not found');
+     return res;
+   }
+
+  src/auth.js — apply? [y]es [n]o [a]ll [q]uit :
+```
+
+Type `y` to apply, `n` to skip, `a` to apply all remaining files without prompting, or `q` to stop.
+
+To skip all prompts (e.g. in scripts or CI):
+
+```bash
+litecode --yes "add error handling to the fetchUser function"
+```
 
 Or start an interactive session:
 
@@ -201,7 +225,8 @@ litecode
 | `litecode map` | Regenerate all context maps |
 | `litecode map --fast` | Regenerate without LLM |
 | `litecode analyze <file>` | Force-generate a detailed line-index for one specific file |
-| `litecode "your request"` | Run one request and exit |
+| `litecode "your request"` | Run one request and exit (shows diff + prompts before each write) |
+| `litecode --yes "your request"` | Same, but applies all changes without prompting |
 | `litecode` | Start interactive mode (send multiple requests) |
 | `litecode chat` | Same as above |
 
@@ -383,6 +408,7 @@ Bugs that were present and have been fixed:
 
 | Issue | Fixed in | Description |
 |---|---|---|
+| **No visibility into AI changes** | `0.2.0` | Changes were applied directly to disk with no way to preview them. LiteCode now shows a colored unified diff (red for removed lines, green for added) for every file before writing, and prompts `[y]es / [n]o / [a]ll / [q]uit`. Use `--yes` to restore the old no-prompt behavior. |
 | **Questions overwrote files** | `0.1.1` | Asking "how many lines does X have?" caused the executor to write the answer *into* the file instead of printing it. The planner now uses `action_type: "query"` for read-only questions, which routes them through a dedicated answer path that never touches disk. |
 | **Stale map silent misroute** | `0.1.0` | If the user named a file in their request that wasn't in the context map, the planner would silently route the action to the wrong file. The orchestrator now validates that mentioned file paths match the planner's output and throws a clear error if they don't. |
 
