@@ -1,6 +1,7 @@
 import type { Config } from "../config/config.js";
 import type { Task } from "./planner.js";
 import { execute } from "./executor.js";
+import type { LLMUsage } from "../llm/client.js";
 import type { Display } from "../ui/display.js";
 
 export interface ExecutionResult {
@@ -9,6 +10,7 @@ export interface ExecutionResult {
   success: boolean;
   content?: string;
   error?: string;
+  usage?: LLMUsage;
 }
 
 function buildWaves(tasks: Task[]): Task[][] {
@@ -60,7 +62,10 @@ async function runBatch(
       const outcome = settled[j];
       if (outcome.status === "fulfilled") {
         display?.taskDone(task.id, task.file);
-        results.push({ taskId: task.id, file: task.file, success: true, content: outcome.value });
+        const val = outcome.value;
+        const content = typeof val === "string" ? val : val.content;
+        const usage = typeof val === "string" ? undefined : val.usage;
+        results.push({ taskId: task.id, file: task.file, success: true, content, usage });
       } else {
         const msg = (outcome.reason as Error).message ?? String(outcome.reason);
         display?.taskFailed(task.id, task.file, msg);

@@ -58,7 +58,7 @@ export async function analyzeFile(
     // Small file — one structured analysis call
     const numbered = lines.map((l, i) => `${i + 1}: ${l}`).join("\n");
     const messages = buildFileAnalysisPrompt(filePath, numbered);
-    fullAnalysis = await callLLM(messages, config, verbose);
+    fullAnalysis = (await callLLM(messages, config, verbose)).content;
   } else {
     // Large file — chunk it and merge
     const chunks: string[] = [`# ${fileName} (${totalLines} lines)\n`];
@@ -71,7 +71,7 @@ export async function analyzeFile(
         process.stderr.write(`[Analyzer] chunk lines ${start + 1}-${end + 1}\n`);
       }
       const result = await callLLM(messages, config, verbose);
-      chunks.push(result);
+      chunks.push(result.content);
     }
     fullAnalysis = chunks.join("\n\n");
   }
@@ -137,7 +137,7 @@ export async function analyzeFolder(
     const messages = buildFolderDescriptionPrompt(folderName, summaryLines.join("\n"));
     if (verbose) process.stderr.write(`[Analyzer] folder description: ${folderName}\n`);
     try {
-      const raw = await callLLM(messages, config, verbose);
+      const raw = (await callLLM(messages, config, verbose)).content;
       // Take first line, strip any markdown syntax the model sneaks in
       folderDescription = raw.split("\n")[0].replace(/^[#*\->]+\s*/, "").trim();
     } catch {

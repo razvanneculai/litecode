@@ -34,8 +34,12 @@
   },
   "homepage": "https://github.com/razvanneculai/litecode#readme",
   "dependencies": {
+    "@types/react": "^19.2.14",
     "commander": "^14.0.3",
     "diff": "^8.0.4",
+    "ink": "^7.0.1",
+    "puppeteer": "^24.41.0",
+    "react": "^19.2.5",
     "tiktoken": "^1.0.22"
   },
   "devDependencies": {

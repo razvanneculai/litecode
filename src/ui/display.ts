@@ -1,5 +1,6 @@
 import { createInterface } from "readline";
 import type { Task } from "../orchestrator/planner.js";
+import type { LLMUsage } from "../llm/client.js";
 
 // ─── ANSI helpers ────────────────────────────────────────────────────────────
 
@@ -319,6 +320,10 @@ export class Display {
       });
     });
   }
+
+  // ── Token usage hook (overridden by TuiDisplay) ───────────────────────────
+
+  onUsage?(_usage: LLMUsage): void { /* no-op in ANSI mode */ }
 
   // ── Blank line ────────────────────────────────────────────────────────────
 

@@ -123,7 +123,8 @@ export async function plan(
   display?.updateSpinner("Asking LLM to plan tasks…");
 
   const messages = buildPlannerPrompt(context, userRequest);
-  let raw = await callLLM(messages, config);
+  let { content: raw, usage } = await callLLM(messages, config);
+  display?.onUsage?.(usage);
 
   let parsed: PlannerResponse;
   try {
@@ -131,7 +132,8 @@ export async function plan(
   } catch {
     display?.thinking("Response wasn't valid JSON — retrying with stricter prompt…");
     const retryMessages = buildRetryPlannerPrompt(context, userRequest);
-    raw = await callLLM(retryMessages, config);
+    ({ content: raw, usage } = await callLLM(retryMessages, config));
+    display?.onUsage?.(usage);
     try {
       parsed = JSON.parse(extractJSON(raw)) as PlannerResponse;
     } catch (err) {

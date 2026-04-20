@@ -17,13 +17,32 @@ import { callLLM } from "../llm/client.js";
 
 const cwd = process.cwd();
 
+function isLocalProvider(baseURL: string | undefined): boolean {
+  if (!baseURL) return false;
+  try {
+    const host = new URL(baseURL).hostname.toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "::1";
+  } catch {
+    return /localhost|127\.0\.0\.1/.test(baseURL);
+  }
+}
+
+function shouldRunSequential(baseURL: string | undefined): boolean {
+  const opts = program.opts();
+  if (opts.parallel) return false;
+  if (opts.sequential) return true;
+  return isLocalProvider(baseURL);
+}
+
 program
   .name("litecode")
   .description("CLI coding agent for 8k-context LLMs")
   .version("0.2.0")
   .option("-v, --verbose", "Show token counts and debug info")
   .option("-y, --yes", "Apply all changes without confirmation")
-  .option("-s, --sequential", "Run tasks one at a time — recommended for local models like Ollama");
+  .option("-s, --sequential", "Run tasks one at a time (default for local models)")
+  .option("-p, --parallel", "Force parallel task execution, even for local models")
+  .option("--ansi", "Use plain ANSI terminal instead of the TUI");
 
 // ─── litecode connect ─────────────────────────────────────────────────────────
 
@@ -93,7 +112,7 @@ program
 program
   .command("chat")
   .description("Start interactive chat mode")
-  .action(() => runInteractive());
+  .action(() => startInteractive());
 
 // ─── litecode "<prompt>" (default) ───────────────────────────────────────────
 
@@ -103,23 +122,22 @@ program
     if (prompt) {
       await runPipeline(prompt);
     } else {
-      await runInteractive();
+      await startInteractive();
     }
   });
 
 // ─── Pipeline ─────────────────────────────────────────────────────────────────
 
-async function runPipeline(userRequest: string): Promise<void> {
-  const display = new Display();
-  const config = loadConfig(cwd);
-  await initEncoder();
-
+async function runPipelineWithDisplay(
+  userRequest: string,
+  display: Display | import("../tui/TuiDisplay.js").TuiDisplay,
+  config: ReturnType<typeof loadConfig>
+): Promise<void> {
   display.section(`"${userRequest}"`);
 
-  // Plan
   let tasks;
   try {
-    tasks = await plan(userRequest, cwd, config, display);
+    tasks = await plan(userRequest, cwd, config, display as Display);
   } catch (err) {
     display.error((err as Error).message);
     return;
@@ -130,7 +148,6 @@ async function runPipeline(userRequest: string): Promise<void> {
     return;
   }
 
-  // ─── Query tasks: answer the question, never touch disk ──────────────────
   const queryTasks = tasks.filter(t => t.action_type === "query");
   const editTasks = tasks.filter(t => t.action_type !== "query");
 
@@ -147,7 +164,9 @@ async function runPipeline(userRequest: string): Promise<void> {
     display.startSpinner(`Reading ${task.file}…`);
     let answer: string;
     try {
-      answer = await callLLM(messages, config);
+      const result = await callLLM(messages, config);
+      answer = result.content;
+      display.onUsage?.(result.usage);
     } catch (err) {
       display.stopSpinner("Query failed", false);
       display.error((err as Error).message);
@@ -162,16 +181,16 @@ async function runPipeline(userRequest: string): Promise<void> {
 
   display.taskList(editTasks);
 
-  // Execute
   const opts = program.opts();
-  if (opts.sequential) config.maxParallelExecutors = 1;
-  const results = await schedule(editTasks, cwd, config, display, userRequest);
+  if (shouldRunSequential(config.provider?.baseURL)) config.maxParallelExecutors = 1;
+  if (opts.verbose) {
+    display.info(`Executor mode: ${config.maxParallelExecutors === 1 ? "sequential" : `parallel (max ${config.maxParallelExecutors})`}`);
+  }
+  const results = await schedule(editTasks, cwd, config, display as Display, userRequest);
 
-  // Apply
   display.blank();
-  await apply(results, editTasks, cwd, display, { yes: opts.yes ?? false });
+  await apply(results, editTasks, cwd, display as Display, { yes: opts.yes ?? false });
 
-  // Summary
   const succeeded = results.filter(r => r.success).length;
   const failed = results.length - succeeded;
   display.blank();
@@ -182,7 +201,53 @@ async function runPipeline(userRequest: string): Promise<void> {
   }
 }
 
-// ─── Interactive REPL ─────────────────────────────────────────────────────────
+async function runPipeline(userRequest: string): Promise<void> {
+  const display = new Display();
+  const config = loadConfig(cwd);
+  await initEncoder();
+  await runPipelineWithDisplay(userRequest, display, config);
+}
+
+// ─── TUI interactive ──────────────────────────────────────────────────────────
+
+async function runTuiInteractive(): Promise<void> {
+  await initEncoder();
+  const config = loadConfig(cwd);
+
+  const { TuiStore } = await import("../tui/store.js");
+  const { TuiDisplay } = await import("../tui/TuiDisplay.js");
+  const { render } = await import("ink");
+  const { default: App } = await import("../tui/App.js");
+
+  const store = new TuiStore();
+  const display = new TuiDisplay(store);
+
+  const handleSubmit = async (text: string) => {
+    if (text === "/connect") {
+      await runConnect(cwd);
+      return;
+    }
+    const freshConfig = loadConfig(cwd);
+    if (shouldRunSequential(freshConfig.provider?.baseURL)) freshConfig.maxParallelExecutors = 1;
+    await runPipelineWithDisplay(text, display, freshConfig);
+  };
+
+  const React = await import("react");
+  render(React.default.createElement(App, { store, config, onSubmit: handleSubmit }));
+}
+
+// ─── Entry point selector ─────────────────────────────────────────────────────
+
+async function startInteractive(): Promise<void> {
+  const opts = program.opts();
+  if (opts.ansi || !process.stdout.isTTY) {
+    await runInteractive();
+  } else {
+    await runTuiInteractive();
+  }
+}
+
+// ─── Interactive REPL (ANSI fallback) ────────────────────────────────────────
 
 async function runInteractive(): Promise<void> {
   await initEncoder();

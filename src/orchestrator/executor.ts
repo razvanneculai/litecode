@@ -1,11 +1,16 @@
 import { resolve } from "path";
 import type { Config } from "../config/config.js";
-import { callLLM } from "../llm/client.js";
+import { callLLM, type LLMUsage } from "../llm/client.js";
 import { buildExecutorPrompt } from "../llm/prompts.js";
 import { canFit } from "../tokens/budget.js";
 import { loadFileForEdit } from "../context/loader.js";
 import type { Task } from "./planner.js";
 import type { Display } from "../ui/display.js";
+
+export interface ExecuteResult {
+  content: string;
+  usage: LLMUsage;
+}
 
 export async function execute(
   task: Task,
@@ -13,7 +18,7 @@ export async function execute(
   config: Config,
   display?: Display,
   originalRequest = ""
-): Promise<string> {
+): Promise<ExecuteResult> {
   const absFile = resolve(projectRoot, task.file);
 
   let fileContent = loadFileForEdit(absFile, task.load_sections ?? undefined);
@@ -62,5 +67,7 @@ export async function execute(
   display?.taskStart(task.id, task.file, budget.totalTokens);
 
   const messages = buildExecutorPrompt(task.action, fileContent, referenceFiles, isNewFile, task.file, originalRequest);
-  return callLLM(messages, config);
+  const result = await callLLM(messages, config);
+  display?.onUsage?.(result.usage);
+  return result;
 }

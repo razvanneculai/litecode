@@ -5,6 +5,18 @@ export interface Message {
   content: string;
 }
 
+export interface LLMUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  rateLimitRemaining: number | null;
+}
+
+export interface LLMResult {
+  content: string;
+  usage: LLMUsage;
+}
+
 interface ChatCompletionResponse {
   choices: Array<{
     message: {
@@ -12,6 +24,11 @@ interface ChatCompletionResponse {
       reasoning_content?: string | null;
     };
   }>;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
 }
 
 // ─── Rate limit helpers ────────────────────────────────────────────────────────
@@ -165,7 +182,7 @@ export async function callLLM(
   messages: Message[],
   config: Config,
   verbose = false
-): Promise<string> {
+): Promise<LLMResult> {
   const url = `${config.provider.baseURL.replace(/\/$/, "")}/chat/completions`;
 
   if (verbose) {
@@ -287,6 +304,16 @@ export async function callLLM(
   // ── Update proactive tracker from 200 response headers ───────────────────
   rateLimitTracker.update(res.headers);
 
+  const rateLimitRemaining = (() => {
+    const raw =
+      res.headers.get("x-ratelimit-remaining-requests") ??
+      res.headers.get("x-ratelimit-remaining") ??
+      res.headers.get("X-RateLimit-Remaining");
+    if (raw === null) return null;
+    const n = parseInt(raw);
+    return isNaN(n) ? null : n;
+  })();
+
   const data = (await res.json()) as ChatCompletionResponse;
   // Some thinking models (Qwen3, DeepSeek-R1, etc.) put output in reasoning_content
   const msg = data.choices?.[0]?.message as Record<string, unknown> | undefined;
@@ -302,5 +329,12 @@ export async function callLLM(
     process.stderr.write(`[LLM] Response preview:\n${content.slice(0, 500)}...\n`);
   }
 
-  return content;
+  const usage: LLMUsage = {
+    promptTokens: data.usage?.prompt_tokens ?? 0,
+    completionTokens: data.usage?.completion_tokens ?? 0,
+    totalTokens: data.usage?.total_tokens ?? 0,
+    rateLimitRemaining,
+  };
+
+  return { content, usage };
 }

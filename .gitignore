@@ -7,6 +7,9 @@ dist/
 # Local config — contains your API key, never commit this
 litecode.json
 
+# Graphify knowledge graph output
+graphify-out/
+
 # Auto-generated context maps (created by `litecode init` / `litecode map`)
 project_context.md
 **/folder_context.md
