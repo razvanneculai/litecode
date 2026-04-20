@@ -22,6 +22,12 @@ LiteCode lets you describe a code change in plain English and have an AI execute
 
 ---
 
+## TUI by default (and how to opt out)
+
+As of v0.4, LiteCode ships with a full TUI (terminal user interface) enabled by default, built on Ink + React. You get a two-pane layout — a scrollable chat/diff view on the left and a live token/model sidebar on the right — plus per-task spinners, inline diff previews, and mouse-wheel scrolling that feels like a webpage (arrow keys, PgUp/PgDn, and `g`/`G` for top/bottom also work). The TUI auto-activates whenever stdout is a TTY. If you prefer the older plain-ANSI REPL — for piping, logging, recording sessions, or running inside environments where the TUI misbehaves — just pass `--ansi` (e.g. `litecode --ansi "add a test for foo"` or `litecode --ansi chat`) and LiteCode falls back to the original line-based interface with no other behavior changes.
+
+---
+
 ## Why LiteCode?
 
 Most AI coding tools assume you have access to a 200k-token model. In practice, the free tiers and local models most developers actually use have **8k context windows** — barely enough for one large file, let alone a whole project.
