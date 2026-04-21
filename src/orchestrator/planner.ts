@@ -5,7 +5,13 @@ import { callLLM } from "../llm/client.js";
 import { buildPlannerPrompt, buildRetryPlannerPrompt } from "../llm/prompts.js";
 import { canFit } from "../tokens/budget.js";
 import { loadProjectMap, loadFolderMap } from "../context/loader.js";
+import { loadMemory, formatMemoryForPrompt } from "./memory.js";
 import type { Display } from "../ui/display.js";
+
+export interface PlanResult {
+  tasks: Task[];
+  synthesis: string;
+}
 
 export interface Task {
   id: string;
@@ -34,6 +40,7 @@ function pathsMatch(a: string, b: string): boolean {
 
 interface PlannerResponse {
   tasks: Task[];
+  synthesis?: string;
 }
 
 function extractJSON(raw: string): string {
@@ -95,23 +102,30 @@ export async function plan(
   projectRoot: string,
   config: Config,
   display?: Display
-): Promise<Task[]> {
+): Promise<PlanResult> {
   display?.startSpinner("Reading project map…");
 
   let projectContext = loadProjectMap(projectRoot);
 
   let folderCtx = loadAllFolderMaps(projectRoot);
 
+  const memoryText = formatMemoryForPrompt(loadMemory(projectRoot));
+
   const budget = canFit(
     "You are a coding task planner.",
     userRequest,
-    [projectContext + folderCtx],
+    [projectContext + folderCtx + memoryText],
     config
   );
 
+  let activeMemory = memoryText;
   if (!budget.fits && folderCtx) {
     folderCtx = "";
     display?.thinking("Folder context too large — dropped to fit token budget");
+  }
+  if (!budget.fits && !folderCtx && activeMemory) {
+    activeMemory = "";
+    display?.thinking("Memory too large — dropped to fit token budget");
   }
 
   const context = (projectContext + folderCtx).trim();
@@ -122,7 +136,7 @@ export async function plan(
 
   display?.updateSpinner("Asking LLM to plan tasks…");
 
-  const messages = buildPlannerPrompt(context, userRequest);
+  const messages = buildPlannerPrompt(context, userRequest, activeMemory);
   let { content: raw, usage } = await callLLM(messages, config);
   display?.onUsage?.(usage);
 
@@ -131,7 +145,7 @@ export async function plan(
     parsed = JSON.parse(extractJSON(raw)) as PlannerResponse;
   } catch {
     display?.thinking("Response wasn't valid JSON — retrying with stricter prompt…");
-    const retryMessages = buildRetryPlannerPrompt(context, userRequest);
+    const retryMessages = buildRetryPlannerPrompt(context, userRequest, activeMemory);
     ({ content: raw, usage } = await callLLM(retryMessages, config));
     display?.onUsage?.(usage);
     try {
@@ -145,6 +159,7 @@ export async function plan(
   }
 
   const tasks = parsed.tasks ?? [];
+  const synthesis = (parsed.synthesis ?? "").trim().slice(0, 240);
   display?.stopSpinner("Plan ready");
 
   const errors = validateTasks(tasks, projectRoot);
@@ -153,7 +168,7 @@ export async function plan(
     const validIds = new Set(
       tasks.filter(t => existsSync(resolve(projectRoot, t.file))).map(t => t.id)
     );
-    return tasks.filter(t => validIds.has(t.id));
+    return { tasks: tasks.filter(t => validIds.has(t.id)), synthesis };
   }
 
   // ─── Bug #2 guard: stale-map silent misroute ────────────────────────────
@@ -195,5 +210,5 @@ export async function plan(
     }
   }
 
-  return tasks;
+  return { tasks, synthesis };
 }

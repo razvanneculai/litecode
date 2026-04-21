@@ -10,6 +10,7 @@ import { analyzeFile } from "../context/analyzer.js";
 import { plan } from "../orchestrator/planner.js";
 import { schedule } from "../orchestrator/scheduler.js";
 import { apply } from "../orchestrator/applier.js";
+import { appendMemory } from "../orchestrator/memory.js";
 import { Display } from "../ui/display.js";
 import { loadFileForEdit } from "../context/loader.js";
 import { buildQueryPrompt } from "../llm/prompts.js";
@@ -37,7 +38,7 @@ function shouldRunSequential(baseURL: string | undefined): boolean {
 program
   .name("litecode")
   .description("CLI coding agent for 8k-context LLMs")
-  .version("0.2.0")
+  .version("1.0.0")
   .option("-v, --verbose", "Show token counts and debug info")
   .option("-y, --yes", "Apply all changes without confirmation")
   .option("-s, --sequential", "Run tasks one at a time (default for local models)")
@@ -136,8 +137,11 @@ async function runPipelineWithDisplay(
   display.section(`"${userRequest}"`);
 
   let tasks;
+  let synthesis = "";
   try {
-    tasks = await plan(userRequest, cwd, config, display as Display);
+    const result = await plan(userRequest, cwd, config, display as Display);
+    tasks = result.tasks;
+    synthesis = result.synthesis;
   } catch (err) {
     display.error((err as Error).message);
     return;
@@ -189,7 +193,20 @@ async function runPipelineWithDisplay(
   const results = await schedule(editTasks, cwd, config, display as Display, userRequest);
 
   display.blank();
-  await apply(results, editTasks, cwd, display as Display, { yes: opts.yes ?? false });
+  const appliedFiles = await apply(results, editTasks, cwd, display as Display, { yes: opts.yes ?? false });
+
+  if (appliedFiles.length > 0 && synthesis) {
+    try {
+      appendMemory(cwd, {
+        request: userRequest,
+        synthesis,
+        files: appliedFiles,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err) {
+      display.warn(`Could not save memory: ${(err as Error).message}`);
+    }
+  }
 
   const succeeded = results.filter(r => r.success).length;
   const failed = results.length - succeeded;

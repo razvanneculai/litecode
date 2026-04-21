@@ -33,9 +33,10 @@ export async function apply(
   projectRoot: string,
   display?: Display,
   options?: ApplyOptions
-): Promise<void> {
+): Promise<string[]> {
   const taskMap = new Map(tasks.map(t => [t.id, t]));
   const skipConfirm = options?.yes ?? false;
+  const applied: string[] = [];
 
   // Pre-pass: capture all original file contents before any writes
   const originals = new Map<string, string>();
@@ -72,7 +73,7 @@ export async function apply(
       }
       if (!skipConfirm && !acceptAll && display) {
         const choice = await display.confirm(task.file);
-        if (choice === "quit") return;
+        if (choice === "quit") return applied;
         if (choice === "all") acceptAll = true;
         if (choice === "no") { display.warn(`Skipped ${task.file}`); continue; }
       }
@@ -80,6 +81,7 @@ export async function apply(
         if (existsSync(absFile)) {
           unlinkSync(absFile);
           display?.fileWrite(task.file, "deleted");
+          applied.push(task.file);
         } else {
           display?.warn(`${task.file}: already absent — nothing to delete`);
         }
@@ -117,7 +119,7 @@ export async function apply(
       // Confirm
       if (!skipConfirm && !acceptAll && display) {
         const choice = await display.confirm(task.file);
-        if (choice === "quit") return;
+        if (choice === "quit") return applied;
         if (choice === "all") acceptAll = true;
         if (choice === "no") { display.warn(`Skipped ${task.file}`); continue; }
       }
@@ -125,6 +127,7 @@ export async function apply(
       // Write
       mkdirSync(dirname(absFile), { recursive: true });
       writeFileSync(absFile, finalContent, "utf-8");
+      applied.push(task.file);
       if (task.load_sections) {
         display?.fileWrite(task.file, `lines ${task.load_sections.start}–${task.load_sections.end}`);
       } else {
@@ -134,4 +137,6 @@ export async function apply(
       display?.fileFail(task.file, (err as Error).message);
     }
   }
+
+  return applied;
 }

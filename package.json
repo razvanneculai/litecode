@@ -1,6 +1,6 @@
 {
   "name": "litecode",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "CLI coding agent for LLMs with 8k context windows — free tiers, local models, and everything in between",
   "main": "dist/cli/index.js",
   "bin": {

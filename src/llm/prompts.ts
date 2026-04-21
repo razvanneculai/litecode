@@ -2,15 +2,21 @@ import type { Message } from "./client.js";
 
 export function buildPlannerPrompt(
   projectContext: string,
-  userRequest: string
+  userRequest: string,
+  memoryText = ""
 ): Message[] {
+  const memoryBlock = memoryText ? `${memoryText}\n\n` : "";
   return [
     {
       role: "system",
       content:
+        memoryBlock +
         "You are a coding task planner. Read the project map. " +
-        "Output ONLY a valid JSON object in this exact shape: {\"tasks\": [...]}. " +
+        "Output ONLY a valid JSON object in this exact shape: {\"synthesis\": \"...\", \"tasks\": [...]}. " +
         "Do NOT return a bare array. Do NOT write code. Do NOT explain. ONLY output the JSON object.\n\n" +
+        "The 'synthesis' field is a single plain-text sentence (<= 200 characters) summarising what this plan as a whole will do. " +
+        "It is used later to remind you what was done; keep it concrete (name the feature/function/file) and in past-tense-ready form " +
+        "(e.g. 'Added a hello() function in src/util.ts and wired it into the index export.').\n\n" +
         "Each task must have: id (string), file (string, relative path), action (string), " +
         "action_type ('edit' | 'create' | 'delete' | 'query'), " +
         "load_sections (null or {start,end}), needs_context_from (string[]), depends_on (string[]).\n\n" +
@@ -158,9 +164,10 @@ export function buildFolderDescriptionPrompt(
 
 export function buildRetryPlannerPrompt(
   projectContext: string,
-  userRequest: string
+  userRequest: string,
+  memoryText = ""
 ): Message[] {
-  const base = buildPlannerPrompt(projectContext, userRequest);
+  const base = buildPlannerPrompt(projectContext, userRequest, memoryText);
   base.push({
     role: "assistant",
     content: "(previous response was not valid JSON)",
@@ -169,7 +176,7 @@ export function buildRetryPlannerPrompt(
     role: "user",
     content:
       "Your previous response was not valid JSON. " +
-      "Output ONLY a JSON object with a 'tasks' array. Nothing else.",
+      "Output ONLY a JSON object of the form {\"synthesis\": \"...\", \"tasks\": [...]}. Nothing else.",
   });
   return base;
 }

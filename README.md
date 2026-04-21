@@ -1,10 +1,10 @@
-# LiteCode v0.4
+# LiteCode v1.0
 
 > The AI coding agent built for the models everyone actually has — free tiers, local models, and 8k context windows.
 
 LiteCode lets you describe a code change in plain English and have an AI execute it across your entire project. No paid subscription. No 200k-token model required. Works right now with a free Groq account, a free OpenRouter key, or just Ollama on your laptop.
 
-> **Early development warning:** LiteCode is experimental software. As of v0.2, it shows a diff and asks for confirmation before touching any file — but it still may produce incorrect edits depending on the model you use. **Always commit or back up your work before running it.** The author takes no responsibility for data loss or file corruption. Use at your own risk.
+> **Warning:** LiteCode is experimental software. It shows a diff and asks for confirmation before touching any file — but it may still produce incorrect edits depending on the model you use. **Always commit or back up your work before running it.** The author takes no responsibility for data loss or file corruption. Use at your own risk.
 
 ---
 
@@ -13,18 +13,57 @@ LiteCode lets you describe a code change in plain English and have an AI execute
 - **Multi-file edits from one instruction** — "rename validateToken to verifyToken everywhere" touches every file that needs changing, in the right order
 - **Never exceeds 8k tokens** — token budget is enforced in code before every single LLM call, not by hoping the model behaves
 - **Runs edits in parallel** — independent file changes happen at the same time; sequential ones wait for their dependencies
-- **Auto-sequential for local models** — when the configured provider is on `localhost`, executors run one at a time automatically, eliminating the parallel connection pressure that causes Ollama to drop requests. Use `--parallel` to override. *(new in v0.4)*
-- **Interactive TUI with scroll + mouse wheel** — persistent chat session, live token sidebar, scrollable history (arrows, PgUp/PgDn, mouse wheel), diff viewer. Run `litecode` with no arguments, or use `--ansi` for the plain terminal mode. *(new in v0.4)*
+- **Short-term memory** — LiteCode remembers the last 2 things it did in your project. Say "undo the last change" or "also add a goodbye() function" and it knows exactly what you mean *(new in v1.0)*
+- **Auto-sequential for local models** — when the configured provider is on `localhost`, executors run one at a time automatically, eliminating the parallel connection pressure that causes Ollama to drop requests
+- **Interactive TUI with scroll + mouse wheel** — persistent chat session, live token sidebar, scrollable history, diff viewer. Run `litecode` with no arguments, or use `--ansi` for the plain terminal mode
 - **Works with any free model** — Groq, OpenRouter, Ollama, LM Studio, Gemini, DeepSeek — all supported out of the box
 - **Context maps are plain Markdown** — readable by humans, cheap on tokens, safe to commit to git
-- **No data leaves your machine** unless you choose a cloud provider — and even then, only the specific files being edited are sent
-- **Diff preview before every write** — see exactly what the AI wants to change, file by file, before anything touches disk *(new in v0.2)*
+- **Diff preview before every write** — see exactly what the AI wants to change, file by file, before anything touches disk
+
+---
+
+## Short-Term Memory
+
+As of v1.0, LiteCode remembers the last 2 actions it performed in each project. This memory is stored in `.litecode/memory.json` inside your project and is injected into the planner's prompt on every request so the AI can reason about what it previously did.
+
+**What this enables:**
+
+```bash
+litecode "add a hello() function that logs 'hi' to utils.js"
+# → Planner adds hello(), applies, saves memory
+
+litecode "undo the last change"
+# → Planner reads memory, knows hello() was added to utils.js, removes it
+
+litecode "also add a goodbye() function"
+# → Planner sees recent context and makes the right decision
+```
+
+**How it works:**
+
+1. After the planner produces a task list, it also outputs a one-sentence `synthesis` describing what the plan will do (e.g. `"Added a hello() function in utils.js"`).
+2. After at least one file is successfully written to disk, LiteCode saves an entry with the user's original request, the synthesis, the files that were written, and a timestamp.
+3. The memory is a **ring buffer of 2** — the oldest entry is evicted when a third is added. This keeps the token cost negligible (~80–90 tokens per entry).
+4. On every subsequent request, the memory block is prepended to the planner's system prompt so it can reason about "last time", "undo", "revert", "previous", etc.
+
+**Token cost:** ~80–90 tokens per entry. The budget check (`canFit`) accounts for memory — if the project context is very large, folder context is dropped first, then memory, to ensure the planner always fits within your configured token limit.
+
+**Storage:** `.litecode/memory.json` — per-project, not global. You can add `.litecode/` to your `.gitignore` if you don't want it committed.
 
 ---
 
 ## TUI by default (and how to opt out)
 
-As of v0.4, LiteCode ships with a full TUI (terminal user interface) enabled by default, built on Ink + React. You get a two-pane layout — a scrollable chat/diff view on the left and a live token/model sidebar on the right — plus per-task spinners, inline diff previews, and mouse-wheel scrolling that feels like a webpage (arrow keys, PgUp/PgDn, and `g`/`G` for top/bottom also work). The TUI auto-activates whenever stdout is a TTY. If you prefer the older plain-ANSI REPL — for piping, logging, recording sessions, or running inside environments where the TUI misbehaves — just pass `--ansi` (e.g. `litecode --ansi "add a test for foo"` or `litecode --ansi chat`) and LiteCode falls back to the original line-based interface with no other behavior changes.
+LiteCode ships with a full TUI (terminal user interface) enabled by default, built on Ink + React. You get a two-pane layout — a scrollable chat/diff view on the left and a live token/model sidebar on the right — plus per-task spinners, inline diff previews, and mouse-wheel scrolling. The TUI auto-activates whenever stdout is a TTY.
+
+If you prefer the older plain-ANSI REPL — for piping, logging, recording sessions, or running inside environments where the TUI misbehaves — pass `--ansi`:
+
+```bash
+litecode --ansi "add a test for foo"
+litecode --ansi chat
+```
+
+No other behavior changes — memory, diffs, and confirmation prompts all work identically in both modes.
 
 ---
 
@@ -42,11 +81,12 @@ You: "rename the login function to authenticate everywhere"
 │  PLANNER (1 AI call)        │
 │                             │
 │  Reads your project map     │
+│  + last 2 memory entries.   │
 │  Figures out which files    │
 │  need to change and in      │
 │  what order.                │
 │                             │
-│  Output: a task list        │
+│  Output: { synthesis, tasks }
 └────────────┬────────────────┘
              │
              ▼
@@ -68,6 +108,11 @@ You: "rename the login function to authenticate everywhere"
    │          │
    ▼          ▼
   Edit       Edit       ← Pure code writes results back to disk
+             │
+             ▼
+    ┌─────────────────┐
+    │ memory.json     │  ← Synthesis + files saved after successful apply
+    └─────────────────┘
 ```
 
 The key insight: **only one file's worth of code ever goes to the AI at a time.** The AI doesn't need to see the whole project — it just needs to know what to change in this one file.
@@ -100,7 +145,7 @@ your-project/
 
 **Layer 3 — `*.file_analysis.md`:** Generated only for large files (over ~150 lines). Contains a line-by-line index so the AI can request only the section it needs — fitting even huge files into an 8k window.
 
-These files are plain Markdown. You can read them. They're safe to commit to git — they act as a persistent memory of your project that persists between sessions.
+These files are plain Markdown. You can read them. They're safe to commit to git — they act as a persistent record of your project's structure between sessions.
 
 ---
 
@@ -113,11 +158,14 @@ Total context window:           8192 tokens
 ─────────────────────────────────────────────
 System prompt + instructions:  ~1000 tokens
 Reserved for AI response:      ~2000 tokens
+Memory (up to 2 entries):       ~180 tokens
 ─────────────────────────────────────────────
 Available for your code:       ~5000 tokens  (≈ 150–200 lines)
 ```
 
 The token counter runs **before every LLM call**. If the code doesn't fit, LiteCode automatically falls back to loading just the relevant section using the file's analysis index. This check never gets skipped.
+
+Priority when budget is tight: folder context is dropped first, then memory, to preserve the most recent history as long as possible.
 
 ---
 
@@ -257,6 +305,14 @@ LiteCode works best with specific, concrete instructions:
 
 You don't need to name files if you don't know them — the Planner reads your project map and figures it out. But the more specific you are, the better the result.
 
+**Memory-aware requests** (v1.0+):
+
+| Request | What LiteCode does |
+|---|---|
+| `"undo the last change"` | Reverses whatever it did in the previous run |
+| `"revert what you did to auth.js"` | Uses memory to find the specific change and reverses it |
+| `"also add X"` | Treats the current request as a continuation of the last one |
+
 ---
 
 ## Config Reference (`litecode.json`)
@@ -342,10 +398,11 @@ litecode/
 │   │   └── index.ts          # Entry point, command definitions (Commander.js)
 │   │
 │   ├── orchestrator/
-│   │   ├── planner.ts        # Sends project map + request to LLM → gets task list
+│   │   ├── planner.ts        # Sends project map + memory + request → gets { synthesis, tasks }
 │   │   ├── executor.ts       # Sends one file + one task to LLM → gets edited content
 │   │   ├── scheduler.ts      # Builds dependency graph, runs waves in parallel
-│   │   └── applier.ts        # Writes LLM output back to disk (or deletes files)
+│   │   ├── applier.ts        # Writes LLM output to disk (or deletes files), returns applied paths
+│   │   └── memory.ts         # loadMemory / appendMemory / formatMemoryForPrompt (ring buffer of 2)
 │   │
 │   ├── context/
 │   │   ├── mapper.ts         # Generates project_context.md and folder_context.md
@@ -360,8 +417,13 @@ litecode/
 │   │   ├── client.ts         # HTTP client for OpenAI-compatible APIs (plain fetch)
 │   │   └── prompts.ts        # System prompts for Planner and Executor roles
 │   │
+│   ├── tui/
+│   │   ├── App.tsx           # Ink root component (two-pane layout)
+│   │   ├── store.ts          # Shared state for TUI (messages, spinners, usage)
+│   │   └── TuiDisplay.ts     # Display adapter that drives the TUI store
+│   │
 │   └── config/
-│       └── config.ts         # Reads litecode.json, merges with global ~/.litecode/config.json
+│       └── config.ts         # Reads litecode.json, merges with ~/.litecode/config.json
 │
 ├── package.json
 ├── tsconfig.json
@@ -374,7 +436,29 @@ litecode/
 - One executor = one file. Never two files in a single call.
 - Context maps are plain Markdown — readable by humans, cheap on tokens.
 - If one executor fails, the rest continue. Nothing crashes the whole run.
+- Memory is written only after at least one file is actually applied to disk — failed or skipped runs don't pollute history.
 - No streaming. Full responses only — simpler and more reliable with small models.
+
+---
+
+## `.litecode/` directory
+
+When you run LiteCode in a project, it creates a `.litecode/` folder:
+
+```
+.litecode/
+└── memory.json    ← Ring buffer of last 2 completed actions
+```
+
+You can safely add this to `.gitignore` if you don't want it committed:
+
+```
+# .gitignore
+.litecode/
+litecode.json
+```
+
+Or commit it if you want memory to persist across machines and teammates. It's plain JSON — readable and diffable.
 
 ---
 
@@ -392,40 +476,57 @@ The project context maps are missing or empty. Run `litecode init --fast` first.
 **"You mentioned 'X' but it doesn't exist on disk"**
 You referred to a file that doesn't exist yet. If you just created or renamed it, run `litecode init --fast` to refresh the maps, then retry.
 
+**"Undo" doesn't target the right file**
+Memory stores the last 2 completed runs. If more than 2 runs have passed since the change you want to undo, memory won't have it — name the file explicitly instead: `"remove the hello() function from utils.js"`.
+
 **Edits are wrong or incomplete**
 - Be more specific in your request (name the function, describe the exact change).
 - Run `litecode analyze src/yourfile.js` to give the agent a better line-level index before editing a large file.
 
 **Ollama drops connections**
-Ollama is single-threaded — parallel LLM calls queue internally and idle connections time out before Ollama dequeues them. As of v0.4, LiteCode detects local providers (any `localhost` / `127.0.0.1` base URL) and runs tasks sequentially by default, so you shouldn't hit this anymore. If you explicitly want parallel execution on a local model, pass `--parallel`. To force sequential on a cloud provider, pass `--sequential`.
+As of v0.4, LiteCode detects local providers and runs tasks sequentially by default. If you're still hitting drops, confirm your `baseURL` is `http://localhost:11434/v1`. Use `--parallel` only if you've confirmed Ollama can handle concurrent requests.
 
 **Output has markdown fences (triple backticks) in the code**
-The model wrapped its response in code blocks despite being told not to. LiteCode strips these automatically, but if it still happens, try a model with stronger instruction-following (Qwen2.5-Coder or DeepSeek-Coder).
+The model wrapped its response in code blocks despite being told not to. LiteCode strips these automatically, but if it persists, switch to a model with stronger instruction-following (Qwen2.5-Coder or DeepSeek-Coder).
 
 ---
 
 ## Known Issues
 
-These are confirmed bugs or limitations that have not yet been fixed:
-
-- **Weak models misclassify complex requests** — Models with poor instruction-following (some Llama 2 variants, older Mistral) occasionally output non-JSON from the planner or generate markdown fences in executor output. Use Qwen2.5-Coder or DeepSeek-Coder for best results.
+- **Weak models misclassify complex requests** — Models with poor instruction-following occasionally output non-JSON from the planner or generate markdown fences in executor output. Use Qwen2.5-Coder or DeepSeek-Coder for best results.
 - **Large binary files in project** — If your project contains large binary files (images, compiled assets) in the same directory, context map generation may be slow. Add them to a `.litecode_ignore` file (future feature) for now.
-- **Sequential task chains > 5 deep** — Very deep dependency chains (task A → B → C → D → E → F) may hit the planner's task limit on some small models. Break the request into smaller steps.
+- **Sequential task chains > 5 deep** — Very deep dependency chains may hit the planner's task limit on some small models. Break the request into smaller steps.
 
 ---
 
-## Solved Issues
+## Changelog
 
-Bugs that were present and have been fixed:
+### v1.0.0
 
-| Issue | Fixed in | Description |
-|---|---|---|
-| **Users had to remember `--sequential` for every local-model run** | `0.4.0` | LiteCode now inspects `provider.baseURL` at run time; any `localhost` / `127.0.0.1` / `0.0.0.0` / `::1` host defaults to `maxParallelExecutors=1`. Cloud providers still run in parallel by default. A new `--parallel` flag restores parallel execution when explicitly requested on a local model. |
-| **TUI flicker and missing scroll** | `0.4.0` | The Ink-based TUI repainted the entire frame on every state update, causing visible flicker when typing or during spinner animation. Memoized child components, isolated the spinner into a leaf component, fixed the fullscreen height off-by-one (ink#450), and added row-budgeted message windowing so long answers no longer overflow the input bar. Added keyboard scrolling (arrows, PgUp/PgDn, `g`/`G`) and xterm SGR mouse wheel support. |
-| **Ollama connection drops on multi-file edits** | `0.3.0` | When a task wave had 3+ independent files, LiteCode fired all LLM calls simultaneously. Ollama queues these internally and idle connections timed out before being served, causing network errors and retries. The new `--sequential` flag (`-s`) overrides `maxParallelExecutors` to 1 for that run, eliminating parallel pressure without changing any config file. |
-| **No visibility into AI changes** | `0.2.0` | Changes were applied directly to disk with no way to preview them. LiteCode now shows a colored unified diff (red for removed lines, green for added) for every file before writing, and prompts `[y]es / [n]o / [a]ll / [q]uit`. Use `--yes` to restore the old no-prompt behavior. |
-| **Questions overwrote files** | `0.1.1` | Asking "how many lines does X have?" caused the executor to write the answer *into* the file instead of printing it. The planner now uses `action_type: "query"` for read-only questions, which routes them through a dedicated answer path that never touches disk. |
-| **Stale map silent misroute** | `0.1.0` | If the user named a file in their request that wasn't in the context map, the planner would silently route the action to the wrong file. The orchestrator now validates that mentioned file paths match the planner's output and throws a clear error if they don't. |
+- **Short-term memory** — LiteCode now remembers the last 2 completed actions per project in `.litecode/memory.json`. The planner receives this history on every call and can reason about "undo", "revert", "last time", and contextual follow-ups like "also add X". Memory is only written after at least one file is successfully applied to disk — failed or query-only runs don't count.
+- **Planner synthesis** — The planner now outputs a `synthesis` field alongside `tasks`: a one-sentence plain-text description of what the plan will do (e.g. `"Added a hello() function in utils.js"`). This is stored in memory and used to inform the next request.
+- **Ring buffer eviction** — The memory file never grows beyond 2 entries. Each new successful run evicts the oldest entry automatically.
+- **Version bumped to 1.0.0.**
+
+### v0.4.0
+
+- **TUI by default** — Full Ink + React terminal UI with two-pane layout, live token sidebar, per-task spinners, and inline diff previews. Use `--ansi` to opt out.
+- **Mouse wheel + keyboard scroll** — Arrow keys, PgUp/PgDn, `g`/`G` for top/bottom, xterm SGR mouse wheel support.
+- **Auto-sequential for local models** — Any provider on `localhost` / `127.0.0.1` / `0.0.0.0` / `::1` defaults to `maxParallelExecutors=1`. Use `--parallel` to override.
+
+### v0.3.0
+
+- **`--sequential` flag** — Force tasks to run one at a time (useful for Ollama and LM Studio).
+
+### v0.2.0
+
+- **Diff preview before every write** — Colored unified diff, per-file `[y]es / [n]o / [a]ll / [q]uit` prompts.
+- **`--yes` flag** — Skip all prompts.
+- **`action_type: query`** — Read-only questions no longer write to files.
+
+### v0.1.x
+
+- **Stale map guard** — Explicit error when a mentioned file path isn't on disk, rather than silently misrouting the action.
 
 ---
 
@@ -435,6 +536,7 @@ Pull requests welcome. Before opening one:
 - Run `npm run build` to verify the TypeScript compiles clean.
 - Test against a small project with `litecode init --fast` followed by a simple edit request.
 - Keep the token-budget rules intact — every LLM call must go through `canFit()` before firing.
+- Memory must only be written when `appliedFiles.length > 0 && synthesis` — do not save memory for failed or query-only runs.
 - Copy `litecode.example.json` to `litecode.json` and fill in your own key for local testing. Never commit `litecode.json`.
 
 ---
